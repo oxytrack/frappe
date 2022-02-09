@@ -35,7 +35,7 @@ from frappe.query_builder import get_query_builder, patch_query_execute
 # Lazy imports
 faker = lazy_import('faker')
 
-__version__ = '13.16.0'
+__version__ = '13.20.0'
 
 __title__ = "Frappe Framework"
 
@@ -141,9 +141,16 @@ lang = local("lang")
 # This if block is never executed when running the code. It is only used for
 # telling static code analyzer where to find dynamically defined attributes.
 if typing.TYPE_CHECKING:
+	from frappe.utils.redis_wrapper import RedisWrapper
+
 	from frappe.database.mariadb.database import MariaDBDatabase
 	from frappe.database.postgres.database import PostgresDatabase
+	from frappe.query_builder.builder import MariaDB, Postgres
+
 	db: typing.Union[MariaDBDatabase, PostgresDatabase]
+	qb: typing.Union[MariaDB, Postgres]
+
+
 # end: static analysis hack
 
 def init(site, sites_path=None, new_site=False):
@@ -304,9 +311,8 @@ def destroy():
 
 	release_local(local)
 
-# memcache
 redis_server = None
-def cache():
+def cache() -> "RedisWrapper":
 	"""Returns redis connection."""
 	global redis_server
 	if not redis_server:
@@ -1191,7 +1197,7 @@ def read_file(path, raise_not_found=False):
 def get_attr(method_string):
 	"""Get python method object from its name."""
 	app_name = method_string.split(".")[0]
-	if not local.flags.in_install and app_name not in get_installed_apps():
+	if not local.flags.in_uninstall and not local.flags.in_install and app_name not in get_installed_apps():
 		throw(_("App {0} is not installed").format(app_name), AppNotInstalledError)
 
 	modulename = '.'.join(method_string.split('.')[:-1])
@@ -1797,7 +1803,7 @@ def get_version(doctype, name, limit=None, head=False, raise_err=True):
 			'limit': limit
 		}, as_list=1)
 
-		from frappe.chat.util import squashify, dictify, safe_json_loads
+		from frappe.utils import squashify, dictify, safe_json_loads
 
 		versions = []
 
@@ -1854,7 +1860,7 @@ def mock(type, size=1, locale='en'):
 			data = getattr(fake, type)()
 			results.append(data)
 
-	from frappe.chat.util import squashify
+	from frappe.utils import squashify
 	return squashify(results)
 
 def validate_and_sanitize_search_inputs(fn):

@@ -4,10 +4,13 @@
 @import "../common/mixins";
 @import "../common/global";
 @import "../common/icons";
+@import "../common/alert";
 @import 'base';
 @import "../common/flex";
 @import "../common/buttons";
 @import "../common/modal";
+@import "../desk/toast";
+@import "../common/css_variables.scss";
 @import "../common/indicator";
 @import "../common/controls";
 @import "../common/awesomeplete";
@@ -188,11 +191,14 @@ h5.modal-title {
 
 .btn-xs {
 	@extend .btn-sm;
+
 }
 
 .hidden-xs {
 	@extend .d-block;
-	@extend .d-sm-none;
+	@include media-breakpoint-between(xs, sm) {
+		display: none !important;
+	}
 }
 
 .visible-xs {

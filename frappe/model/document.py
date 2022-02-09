@@ -8,7 +8,7 @@ from frappe import _, msgprint, is_whitelisted
 from frappe.utils import flt, cstr, now, get_datetime_str, file_lock, date_diff
 from frappe.model.base_document import BaseDocument, get_controller
 from six import iteritems, string_types
-from frappe.model.naming import set_new_name, gen_new_name_for_cancelled_doc
+from frappe.model.naming import set_new_name
 from werkzeug.exceptions import NotFound, Forbidden
 import hashlib, json
 from frappe.model import optional_fields, table_fields
@@ -191,9 +191,11 @@ class Document(BaseDocument):
 		is not set.
 
 		:param permtype: one of `read`, `write`, `submit`, `cancel`, `delete`"""
+		import frappe.permissions
+
 		if self.flags.ignore_permissions:
 			return True
-		return frappe.has_permission(self.doctype, permtype, self, verbose=verbose)
+		return frappe.permissions.has_permission(self.doctype, permtype, self, verbose=verbose)
 
 	def raise_no_permission_to(self, perm_type):
 		"""Raise `frappe.PermissionError`."""
@@ -304,10 +306,12 @@ class Document(BaseDocument):
 		self.flags.ignore_version = frappe.flags.in_test if ignore_version is None else ignore_version
 
 		if self.get("__islocal") or not self.get("name"):
-			self.insert()
-			return
+			return self.insert()
 
 		self.check_permission("write", "save")
+
+		if self.docstatus == 2:
+			self._rename_doc_on_cancel()
 
 		self.set_user_and_timestamp()
 		self.set_docstatus()
@@ -710,6 +714,7 @@ class Document(BaseDocument):
 			else:
 				tmp = frappe.db.sql("""select modified, docstatus from `tab{0}`
 					where name = %s for update""".format(self.doctype), self.name, as_dict=True)
+
 				if not tmp:
 					frappe.throw(_("Record does not exist"))
 				else:
@@ -748,8 +753,10 @@ class Document(BaseDocument):
 			elif self.docstatus==1:
 				self._action = "submit"
 				self.check_permission("submit")
+			elif self.docstatus==2:
+				raise frappe.DocstatusTransitionError(_("Cannot change docstatus from 0 (Draft) to 2 (Cancelled)"))
 			else:
-				raise frappe.DocstatusTransitionError(_("Cannot change docstatus from 0 to 2"))
+				raise frappe.ValidationError(_("Invalid docstatus"), self.docstatus)
 
 		elif docstatus==1:
 			if self.docstatus==1:
@@ -758,8 +765,10 @@ class Document(BaseDocument):
 			elif self.docstatus==2:
 				self._action = "cancel"
 				self.check_permission("cancel")
+			elif self.docstatus==0:
+				raise frappe.DocstatusTransitionError(_("Cannot change docstatus from 1 (Submitted) to 0 (Draft)"))
 			else:
-				raise frappe.DocstatusTransitionError(_("Cannot change docstatus from 1 to 0"))
+				raise frappe.ValidationError(_("Invalid docstatus"), self.docstatus)
 
 		elif docstatus==2:
 			raise frappe.ValidationError(_("Cannot edit cancelled document"))
@@ -920,14 +929,8 @@ class Document(BaseDocument):
 
 	@whitelist.__func__
 	def _cancel(self):
-		"""Cancel the document. Sets `docstatus` = 2, then saves.
-		"""
+		"""Cancel the document. Sets `docstatus` = 2, then saves."""
 		self.docstatus = 2
-		if frappe.get_system_settings('use_original_name_for_amended_document', ignore_if_not_exists=True):
-			new_name = gen_new_name_for_cancelled_doc(self)
-			frappe.rename_doc(self.doctype, self.name, new_name, force=True, show_alert=False)
-			self.name = new_name
-
 		return self.save()
 
 	@whitelist.__func__
@@ -1357,6 +1360,12 @@ class Document(BaseDocument):
 		"""Return a list of Tags attached to this document"""
 		from frappe.desk.doctype.tag.tag import DocTags
 		return DocTags(self.doctype).get_tags(self.name).split(",")[1:]
+
+	def _rename_doc_on_cancel(self):
+		if frappe.get_system_settings('use_original_name_for_amended_document', ignore_if_not_exists=True):
+			new_name = gen_new_name_for_cancelled_doc(self)
+			frappe.rename_doc(self.doctype, self.name, new_name, force=True, show_alert=False)
+			self.name = new_name
 
 	def __repr__(self):
 		name = self.name or "unsaved"
